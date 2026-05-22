@@ -6,6 +6,7 @@ import { authPlugins } from 'mysql2';
 import { UserModule } from './user/user.module';
 import { User } from './user/entities/user.entity';
 import { RedisModule } from './redis/redis.module';
+import { RankingModule } from './ranking/ranking.module';
 
 @Module({
   imports: [
@@ -27,7 +28,8 @@ import { RedisModule } from './redis/redis.module';
       }
     }),
     UserModule,
-    RedisModule
+    RedisModule,
+    RankingModule
   ],
   controllers: [AppController],
   providers: [AppService],
