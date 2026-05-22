@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { authPlugins } from 'mysql2';
 import { UserModule } from './user/user.module';
 import { User } from './user/entities/user.entity';
+import { RedisModule } from './redis/redis.module';
 
 @Module({
   imports: [
@@ -25,7 +26,8 @@ import { User } from './user/entities/user.entity';
         },
       }
     }),
-    UserModule
+    UserModule,
+    RedisModule
   ],
   controllers: [AppController],
   providers: [AppService],

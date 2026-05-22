@@ -1,15 +1,146 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { User } from './entities/user.entity';
-import { EntityManager } from 'typeorm';
+import { EntityManager, In } from 'typeorm';
 import { InjectEntityManager } from '@nestjs/typeorm';
+import { RedisService } from 'src/redis/redis.service';
 
 @Injectable()
 export class UserService {
-
   @InjectEntityManager()
   entityManager: EntityManager;
+
+  @Inject(RedisService)
+  redisService: RedisService;
+
+  async findUserByIds(userIds: string[] | number[]) {
+    const users = await this.entityManager.findBy(User, {
+      id: In(userIds.map(Number)),
+    });
+    return users;
+  }
+
+  async getFollowRelationship(userId: number) {
+    const exists = await this.redisService.exists('followers:' + userId);
+    if (!exists) {
+      const user = await this.entityManager.findOne(User, {
+        where: {
+          id: userId,
+        },
+        relations: { followers: true, following: true },
+      });
+
+      if (!user) {
+        return {
+          followers: [],
+          following: [],
+          followEachOther: [],
+        };
+      }
+
+      if (!user.followers.length || !user.following.length) {
+        return {
+          followers: user.followers,
+          following: user.following,
+          followEachOther: [],
+        };
+      }
+
+      await this.redisService.sAdd(
+        'followers:' + userId,
+        ...user.followers.map((item) => item.id.toString()),
+      );
+
+      await this.redisService.sAdd(
+        'following:' + userId,
+        ...user.following.map((item) => item.id.toString()),
+      );
+
+      await this.redisService.sInterStore(
+        'follow-each-other:' + userId,
+        'followers:' + userId,
+        'following:' + userId,
+      );
+
+      const followEachOtherIds = await this.redisService.sMember(
+        'follow-each-other:' + userId,
+      );
+
+      const followEachOtherUsers = await this.findUserByIds(followEachOtherIds);
+
+      return {
+        followers: user.followers,
+        following: user.following,
+        followEachOther: followEachOtherUsers,
+      };
+    } else {
+      const followerIds = await this.redisService.sMember(
+        'followers:' + userId,
+      );
+
+      const followUsers = await this.findUserByIds(followerIds);
+
+      const followingIds = await this.redisService.sMember(
+        'following:' + userId,
+      );
+
+      const followingUsers = await this.findUserByIds(followingIds);
+
+      const followEachOtherIds = await this.redisService.sMember(
+        'follow-each-other:' + userId,
+      );
+
+      const followEachOtherUsers = await this.findUserByIds(followEachOtherIds);
+
+      return {
+        followers: followUsers,
+        following: followingUsers,
+        followEachOtherUsers: followEachOtherUsers,
+      };
+    }
+  }
+
+  async follow(userId: number, userId2: number) {
+    const user = await this.entityManager.findOne(User, {
+      where: {
+        id: userId,
+      },
+      relations: { followers: true, following: true },
+    });
+
+    const user2 = await this.entityManager.findOne(User, {
+      where: {
+        id: userId2,
+      },
+    });
+
+    user!.followers.push(user2!);
+
+    await this.entityManager.save(User, user!);
+
+    const exists = await this.redisService.exists('followers:' + userId);
+
+    if (exists) {
+      await this.redisService.sAdd('followers:' + userId, userId2.toString());
+      await this.redisService.sInterStore(
+        'follow-each-other:' + userId,
+        'followers:' + userId,
+        'following:' + userId,
+      );
+    }
+
+    const exists2 = await this.redisService.exists('following:' + userId2);
+
+    if (exists2) {
+      await this.redisService.sAdd('following:' + userId2, userId.toString());
+      await this.redisService.sInterStore(
+        'follow-each-other:' + userId2,
+        'followers:' + userId2,
+        'following:' + userId2,
+      );
+    }
+  }
 
   async initData() {
     const user2 = new User();
